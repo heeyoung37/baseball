@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>야구 회비 내역</title>
+  <style>
+    :root{
+      /* ==== Dark theme + Orange header ==== */
+      --bg:#0f1115;
+      --sheet:#151821;
+      --grid:#2a2f3a;
+      --header:#ff8a00; /* 오렌지 헤더 */
+      --header-fg:#111;
+      --accent:#272b36; /* 합계줄 배경 */
+      --brand:#f0f4ff;
+      --primary:#e5e7eb;
+      --muted:#9aa4b2;
+      --highlight:#2a2f3a; /* 잔여 박스 배경 */
+      --ok:#4dabf7;
+      --danger:#ff6b6b;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; background:var(--bg); color:var(--primary);
+      font-family:"Pretendard","Apple SD Gothic Neo","Noto Sans KR",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,"Helvetica Neue",Arial,"Apple Color Emoji","Segoe UI Emoji";
+    }
+    .wrap{max-width:1100px; margin:28px auto; padding:0 16px;}
+    .title{ font-size:28px; font-weight:800; letter-spacing:.5px; text-align:center; margin:0 0 14px; }
+
+    .sheet{ display:grid; grid-template-columns: 1fr 280px; gap:18px; }
+    .card{background:var(--sheet); border:1px solid var(--grid); border-radius:12px; overflow:hidden; box-shadow:0 6px 18px rgba(0,0,0,.25)}
+
+    /* balance card */
+    .balance{ align-self:start; }
+    .balance .head{background:#1b1f29; padding:12px 14px; font-weight:700; border-bottom:1px solid var(--grid);}
+    .balance .value{background:var(--highlight); margin:14px; border-radius:12px; padding:20px 16px; text-align:right; font-size:28px; font-weight:800;}
+
+    /* table */
+    table{width:100%; border-collapse:collapse; table-layout:fixed;}
+    thead th{background:var(--header); color:#1a1a1a; font-size:15px; padding:12px 8px; border-bottom:2px solid #e26e00;}
+    tbody td{border-bottom:1px solid var(--grid); padding:10px 8px; font-size:14px; vertical-align:middle;}
+    tfoot td{background:var(--accent); font-weight:700; padding:12px 8px;}
+    colgroup col:nth-child(1){width:120px}
+    colgroup col:nth-child(2){width:auto}
+    colgroup col:nth-child(3){width:120px}
+    colgroup col:nth-child(4){width:120px}
+    colgroup col:nth-child(5){width:160px}
+
+    .num{ text-align:right; }
+    .muted{ color:var(--muted); }
+
+    /* add form */
+    .toolbar{ display:flex; gap:10px; flex-wrap:wrap; padding:12px; border-bottom:1px solid var(--grid); background:#1b1f29; }
+    .toolbar input,.toolbar select, .toolbar button{ height:38px; padding:0 12px; border:1px solid #3a4150; border-radius:10px; background:#0f1320; color:var(--primary); font-size:14px; }
+    .toolbar input::placeholder{ color:#677086; }
+    .toolbar button{ cursor:pointer; font-weight:700; }
+    .toolbar .add{ background:var(--header); color:#1a1a1a; border-color:#e26e00; }
+    .toolbar .reset{ background:#0f1320; }
+
+    .btn-x{ background:transparent; border:none; color:#8b93a7; cursor:pointer; font-size:16px; padding:4px; }
+    .btn-x:hover{ color:var(--danger); }
+
+    @media (max-width: 920px){ .sheet{ grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="title">야구 회비 내역</h1>
+
+    <div class="sheet">
+      <!-- 좌측: 표 -->
+      <div class="card">
+        <!-- 입력 툴바 -->
+        <div class="toolbar">
+          <input type="date" id="dateInput" />
+          <input type="text" id="descInput" placeholder="내역" style="min-width:220px; flex:1;" />
+          <select id="typeInput" title="구분">
+            <option value="income">수입</option>
+            <option value="expense">지출</option>
+          </select>
+          <input type="number" id="amountInput" placeholder="금액" min="0" step="1" />
+          <input type="text" id="noteInput" placeholder="비고" style="width:200px" />
+          <button class="add" id="addBtn">추가</button>
+          <button class="reset" id="clearBtn" title="로컬 데이터 초기화">초기화</button>
+        </div>
+
+        <table id="duesTable" aria-label="야구 회비 내역 표">
+          <colgroup>
+            <col><col><col><col><col>
+          </colgroup>
+          <thead>
+            <tr>
+              <th>날짜</th>
+              <th>내역</th>
+              <th>금액<br><span class="muted">수입</span></th>
+              <th>금액<br><span class="muted">지출</span></th>
+              <th>비고</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="2">수입지출 총계</td>
+              <td class="num" id="incomeSum">0</td>
+              <td class="num" id="expenseSum">0</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <!-- 우측: 잔여 회비 카드 -->
+      <div class="balance card">
+        <div class="head">잔여 회비</div>
+        <div class="value" id="balance">0</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== 구성 =====
+    // 'local' : 브라우저 로컬 저장소 사용
+    // 'sheets': 구글 시트(Apps Script Web App) 연동
+    const MODE = 'sheets'; // 필요 시 'sheets' 로 바꾸세요
+    const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx7smrItNT9EkfK0orlJzcc-L6AIg4Gfkiiey4FXG76N_DH3BkPWvyGqcVTDYVfiyX3/exec'; // 배포 후 URL
+    const STORAGE_KEY = 'duesEntries.v1';
+
+    // 초기 데이터 (로컬 모드 전용)
+    const seed = [
+      {id:'seed1',date:'2025-07-28', desc:'감독님 지원금 및 이월회비', type:'income', amount:64502, note:'50000원 지원'},
+      {id:'seed2',date:'2025-07-29', desc:'야구장 물구입 3개', type:'expense', amount:3000, note:''},
+      {id:'seed3',date:'2025-07-29', desc:'얼음 3kg, 게토레이 1개 구입', type:'expense', amount:8000, note:''},
+      {id:'seed4',date:'2025-08-21', desc:'야구장 물구입 3개', type:'expense', amount:3000, note:''},
+      {id:'seed5',date:'2025-08-22', desc:'로진백 2개 구매 쿠팡', type:'expense', amount:11070, note:''},
+      {id:'seed6',date:'2025-08-22', desc:'이상윤님 입단 회비', type:'income', amount:140000, note:''},
+      {id:'seed7',date:'2025-08-26', desc:'야구장 물구입 4개', type:'expense', amount:4000, note:''},
+      {id:'seed8',date:'2025-09-05', desc:'윤성은님 입단 회비', type:'income', amount:150000, note:''}
+    ];
+
+    // 공통 DOM
+    const tbody = document.getElementById('tbody');
+    const incomeSumEl = document.getElementById('incomeSum');
+    const expenseSumEl = document.getElementById('expenseSum');
+    const balanceEl = document.getElementById('balance');
+    const dateInput = document.getElementById('dateInput');
+    const descInput = document.getElementById('descInput');
+    const typeInput = document.getElementById('typeInput');
+    const amountInput = document.getElementById('amountInput');
+    const noteInput = document.getElementById('noteInput');
+    const addBtn = document.getElementById('addBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    // ===== 저장/불러오기 레이어 =====
+    async function load(){
+      if(MODE==='sheets'){
+        const r = await fetch(WEB_APP_URL+"?mode=list", {method:'GET'});
+        const json = await r.json();
+        return json.rows || [];
+      }
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw){ localStorage.setItem(STORAGE_KEY, JSON.stringify(seed)); return seed.slice(); }
+      try{ return JSON.parse(raw); }catch{ return seed.slice(); }
+    }
+
+    async function addRow(row){
+      if(MODE==='sheets'){
+        const r = await fetch(WEB_APP_URL, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({mode:'add', row})
+        });
+        const js = await r.json();
+        return js.ok;
+      }
+      const rows = await load();
+      row.id = crypto.randomUUID();
+      rows.push(row); localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+      return true;
+    }
+
+    async function deleteRow(id){
+      if(MODE==='sheets'){
+        await fetch(WEB_APP_URL, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({mode:'delete', id})
+        });
+        return true;
+      }
+      const rows = await load();
+      const idx = rows.findIndex(r=>r.id===id);
+      if(idx>-1){ rows.splice(idx,1); localStorage.setItem(STORAGE_KEY, JSON.stringify(rows)); }
+      return true;
+    }
+
+    function fmt(n){ return (n||0).toLocaleString('ko-KR'); }
+
+    async function render(){
+      const rows = (await load()).sort((a,b)=> (a.date||'').localeCompare(b.date));
+      tbody.innerHTML = '';
+      let income=0, expense=0;
+
+      for(const row of rows){
+        const tr = document.createElement('tr');
+
+        const dateTd = document.createElement('td');
+        dateTd.textContent = row.date ? row.date.replaceAll('-','.') : '';
+
+        const descTd = document.createElement('td');
+        descTd.textContent = row.desc || '';
+
+        const incomeTd = document.createElement('td'); incomeTd.className='num';
+        const expenseTd = document.createElement('td'); expenseTd.className='num';
+
+        if(row.type==='income'){ incomeTd.textContent = fmt(row.amount); income += +row.amount||0; }
+        else { expenseTd.textContent = fmt(row.amount); expense += +row.amount||0; }
+
+        const noteTd = document.createElement('td');
+        noteTd.textContent = row.note || '';
+
+        const delBtn = document.createElement('button');
+        delBtn.className='btn-x'; delBtn.title='행 삭제'; delBtn.innerHTML='✕';
+        delBtn.addEventListener('click', async ()=>{ await deleteRow(row.id); render(); });
+        noteTd.appendChild(delBtn);
+
+        tr.append(dateTd, descTd, incomeTd, expenseTd, noteTd);
+        tbody.appendChild(tr);
+      }
+
+      incomeSumEl.textContent = fmt(income);
+      expenseSumEl.textContent = fmt(expense);
+      balanceEl.textContent = fmt(income - expense);
+    }
+
+    addBtn.addEventListener('click', async ()=>{
+      const date = dateInput.value;
+      const desc = descInput.value.trim();
+      const type = typeInput.value;
+      const amount = Math.max(0, Math.floor(Number(amountInput.value||0)));
+      const note = noteInput.value.trim();
+      if(!date || !desc || !amount){ alert('날짜, 내역, 금액을 입력하세요.'); return; }
+      await addRow({date, desc, type, amount, note});
+      descInput.value = ''; amountInput.value = ''; noteInput.value = '';
+      render();
+    });
+
+    clearBtn.addEventListener('click', ()=>{
+      if(MODE==='sheets'){ alert('시트 연동 모드에서는 초기화할 수 없습니다. 시트에서 직접 정리하세요.'); return; }
+      if(confirm('모든 로컬 데이터를 삭제하고 초기 상태로 되돌릴까요?')){
+        localStorage.removeItem(STORAGE_KEY); render();
+      }
+    });
+
+    // 오늘 날짜 기본값
+    dateInput.valueAsNumber = Date.now() - (new Date()).getTimezoneOffset()*60000;
+
+    render();
+  </script>
+</body>
+</html>
